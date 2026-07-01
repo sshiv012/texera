@@ -149,4 +149,104 @@ describe("AgentService", () => {
         .flush({ status: "stopping" });
     });
   });
+
+  describe("revertTurn", () => {
+    it("sends a revert command for the given turn over the websocket", () => {
+      const send = vi.fn();
+      (service as any).agentStateTracking.set("agent-1", {
+        websocket: { readyState: WebSocket.OPEN, send },
+      });
+
+      service.revertTurn("agent-1", "msg-7");
+
+      expect(send).toHaveBeenCalledWith(JSON.stringify({ type: "WsClientRevertCommand", messageId: "msg-7" }));
+    });
+
+    it("does not send when no websocket is open", () => {
+      const send = vi.fn();
+      (service as any).agentStateTracking.set("agent-1", {
+        websocket: { readyState: WebSocket.CLOSED, send },
+      });
+
+      service.revertTurn("agent-1", "msg-7");
+
+      expect(send).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("redo", () => {
+    it("sends a redo command over the websocket", () => {
+      const send = vi.fn();
+      (service as any).agentStateTracking.set("agent-1", {
+        websocket: { readyState: WebSocket.OPEN, send },
+      });
+
+      service.redo("agent-1");
+
+      expect(send).toHaveBeenCalledWith(JSON.stringify({ type: "WsClientRedoCommand" }));
+    });
+  });
+
+  describe("sendMessage clears redo", () => {
+    it("resets canRedo when a new prompt is sent (mirrors the backend clearing its stack)", () => {
+      const send = vi.fn();
+      const tracking = (service as any).getOrCreateStateTracking("agent-1");
+      tracking.websocket = { readyState: WebSocket.OPEN, send };
+      tracking.canRedoSubject.next(true);
+      (service as any).agents.set("agent-1", { id: "agent-1", name: "Bob" });
+
+      service.sendMessage("agent-1", "hello");
+
+      expect(send).toHaveBeenCalled();
+      expect(tracking.canRedoSubject.getValue()).toBe(false);
+    });
+  });
+
+  describe("WsServerHeadChangeEvent handling", () => {
+    it("advances the head pointer and reloads the workflow on a revert", () => {
+      const tracking = (service as any).getOrCreateStateTracking("agent-1");
+      const content = { operators: [], operatorPositions: {}, links: [], commentBoxes: [], settings: {} };
+
+      (service as any).handleWebSocketMessage("agent-1", tracking, {
+        type: "WsServerHeadChangeEvent",
+        headId: "step-initial",
+        workflowContent: content,
+      });
+
+      expect(tracking.headIdSubject.getValue()).toEqual("step-initial");
+      expect(tracking.workflowSubject.getValue()?.content).toEqual(content);
+      expect(tracking.wsWorkflowActive).toBe(true);
+    });
+
+    it("applies workflowContent and canRedo from a snapshot (reconnect after revert)", () => {
+      const tracking = (service as any).getOrCreateStateTracking("agent-1");
+      const content = { operators: [], operatorPositions: {}, links: [], commentBoxes: [], settings: {} };
+
+      (service as any).handleWebSocketMessage("agent-1", tracking, {
+        type: "WsServerSnapshotEvent",
+        state: "AVAILABLE",
+        steps: [],
+        headId: "step-initial",
+        workflowContent: content,
+        canRedo: true,
+      });
+
+      expect(tracking.headIdSubject.getValue()).toBe("step-initial");
+      expect(tracking.workflowSubject.getValue()?.content).toEqual(content);
+      expect(tracking.canRedoSubject.getValue()).toBe(true);
+    });
+
+    it("updates canRedo from the head-change event", () => {
+      const tracking = (service as any).getOrCreateStateTracking("agent-1");
+
+      (service as any).handleWebSocketMessage("agent-1", tracking, {
+        type: "WsServerHeadChangeEvent",
+        headId: "step-initial",
+        workflowContent: { operators: [], operatorPositions: {}, links: [], commentBoxes: [], settings: {} },
+        canRedo: true,
+      });
+
+      expect(tracking.canRedoSubject.getValue()).toBe(true);
+    });
+  });
 });

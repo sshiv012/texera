@@ -91,6 +91,8 @@ export class TexeraAgent {
   private workflowState: WorkflowState;
   private metadataStore: WorkflowSystemMetadata;
   private head: string = INITIAL_STEP_ID;
+  // Pre-revert HEADs, pushed on revert and cleared on a new prompt.
+  private redoStack: string[] = [];
   private stepsById: Map<string, ReActStep> = new Map();
   private stepCounter = 0;
   private workflowResultState: WorkflowResultState;
@@ -476,6 +478,7 @@ export class TexeraAgent {
   }
 
   async sendMessage(userMessage: string, messageSource?: "chat" | "feedback"): Promise<AgentMessageResult> {
+    this.redoStack = []; // a new prompt invalidates redo
     const messageId = `msg-${this.agentId}-${++this.messageCounter}-${Date.now()}`;
     let stepIndex = 0;
 
@@ -662,6 +665,8 @@ export class TexeraAgent {
       if (isAborted) {
         stepIndex++;
         const stoppedStepId = this.generateStepId();
+        // Snapshot so revert/redo work when a turn ends on this step.
+        const stoppedContent = this.workflowState.getWorkflowContent();
         const stoppedStep: ReActStep = {
           id: stoppedStepId,
           parentId: this.head,
@@ -672,6 +677,8 @@ export class TexeraAgent {
           content: "Generation stopped by user.",
           isBegin: false,
           isEnd: true,
+          beforeWorkflowContent: stoppedContent,
+          afterWorkflowContent: stoppedContent,
         };
         this.addStep(stoppedStep);
         this.head = stoppedStepId;
@@ -686,6 +693,8 @@ export class TexeraAgent {
 
       stepIndex++;
       const errorStepId = this.generateStepId();
+      // Snapshot so revert/redo work when a turn ends on an error step.
+      const errorContent = this.workflowState.getWorkflowContent();
       const errorStep: ReActStep = {
         id: errorStepId,
         parentId: this.head,
@@ -696,6 +705,8 @@ export class TexeraAgent {
         content: `Error: ${error.message || String(error)}`,
         isBegin: false,
         isEnd: true,
+        beforeWorkflowContent: errorContent,
+        afterWorkflowContent: errorContent,
       };
       this.addStep(errorStep);
       this.head = errorStepId;
@@ -730,10 +741,74 @@ export class TexeraAgent {
     }
   }
 
+  /**
+   * Revert the conversation to the state immediately BEFORE the given turn.
+   * Moves HEAD to that turn's parent step and restores the workflow to the
+   * turn's pre-edit snapshot. The reverted turn (and any later turns on this
+   * branch) drop out of the visible path but remain in the tree, so a later
+   * prompt simply branches from the new HEAD.
+   *
+   * @returns the new HEAD id and the restored workflow content
+   * @throws if the messageId is not a known turn
+   */
+  revertToTurnStart(messageId: string): { headId: string; workflowContent: any } {
+    const steps = this.reActStepsByMessageId.get(messageId);
+    if (!steps || steps.length === 0) {
+      throw new Error(`Unknown turn: ${messageId}`);
+    }
+    // steps[0] is the user step: its parentId is the prior HEAD.
+    const userStep = steps[0];
+    const newHead = userStep.parentId ?? INITIAL_STEP_ID;
+    const workflowContent = userStep.beforeWorkflowContent;
+
+    this.redoStack.push(this.head);
+    this.head = newHead;
+    this.currentMessageId = undefined;
+    if (workflowContent !== undefined) {
+      this.workflowState.setWorkflowContent(workflowContent);
+    }
+    this.log.info({ messageId, newHead }, "reverted to turn start");
+    return { headId: newHead, workflowContent };
+  }
+
+  /** Whether a previously reverted turn can be redone. */
+  canRedo(): boolean {
+    return this.redoStack.length > 0;
+  }
+
+  /**
+   * Redo the most recent revert: move HEAD forward to the step it pointed at
+   * before that revert, restoring that step's resulting workflow.
+   *
+   * @returns the new HEAD id and the restored workflow content
+   * @throws if there is nothing to redo
+   */
+  redo(): { headId: string; workflowContent: any } {
+    const target = this.redoStack.pop();
+    if (target === undefined) {
+      throw new Error("Nothing to redo");
+    }
+    this.head = target;
+    // Fall back to the nearest ancestor snapshot if this step has none.
+    let workflowContent: any;
+    let cursor: string | undefined = target;
+    while (workflowContent === undefined && cursor) {
+      const step = this.stepsById.get(cursor);
+      workflowContent = step?.afterWorkflowContent;
+      cursor = step?.parentId;
+    }
+    if (workflowContent !== undefined) {
+      this.workflowState.setWorkflowContent(workflowContent);
+    }
+    this.log.info({ target }, "redid revert");
+    return { headId: target, workflowContent };
+  }
+
   clearHistory(): void {
     this.reActStepsByMessageId.clear();
     this.stepsById.clear();
     this.currentMessageId = undefined;
+    this.redoStack = [];
     this.head = INITIAL_STEP_ID;
     const initialStep: ReActStep = {
       id: INITIAL_STEP_ID,

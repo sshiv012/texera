@@ -34,7 +34,11 @@ export class WsServerSnapshotEvent {
   constructor(
     readonly state: AgentState,
     readonly steps: ReActStep[],
-    readonly headId: string
+    readonly headId: string,
+    // Workflow at the current HEAD, so a client connecting after a revert/redo can
+    // reload the canvas to that state instead of only moving its head pointer.
+    readonly workflowContent: any,
+    readonly canRedo: boolean = false
   ) {}
 }
 
@@ -59,5 +63,24 @@ export class WsServerErrorEvent {
   constructor(readonly error: string) {}
 }
 
+/**
+ * HEAD moved without a new step being produced — emitted after a revert. Carries
+ * the new HEAD id and the workflow content at that point, so clients can recompute
+ * the visible step path and reload the canvas.
+ */
+export class WsServerHeadChangeEvent {
+  readonly type = "WsServerHeadChangeEvent";
+  constructor(
+    readonly headId: string,
+    readonly workflowContent: any,
+    readonly canRedo: boolean = false
+  ) {}
+}
+
 /** Discriminated union of every server -> client frame. */
-export type WsServerEvent = WsServerSnapshotEvent | WsServerStepEvent | WsServerStatusEvent | WsServerErrorEvent;
+export type WsServerEvent =
+  | WsServerSnapshotEvent
+  | WsServerStepEvent
+  | WsServerStatusEvent
+  | WsServerErrorEvent
+  | WsServerHeadChangeEvent;
