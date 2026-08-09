@@ -193,8 +193,40 @@ are dispatched in batches up to `AmberConfig.maxConcurrentRegions`, respecting D
 (e.g. loop ops, whose back-edge is a cross-region materialized state channel) forces the whole plan to
 `MATERIALIZED`.
 
+**Walls → Regions, in code** (`CostBasedScheduleGenerator.createRegions`):
+```scala
+// Pass 0 — remove materialized edges; each remaining connected component IS a Region
+val matEdgesRemovedDAG = matEdges.foldLeft(physicalPlan)(_.removeLink(_))
+val connectedComponents = new BiconnectivityInspector(matEdgesRemovedDAG.dag).getConnectedComponents
+// Pass 1 — per component: operators = vertices; links = pipelined links (.diff(matEdges));
+//   each materialized edge's SOURCE output port gets a storage URI (the materialization document):
+matEdges.filter(e => operators.contains(e.fromOpId)).map(e => GlobalPortIdentity(e.fromOpId, e.fromPortId))
+```
+- **A Region = a connected component of the DAG after the materialized edges are removed** — a maximal set
+  of operators still joined by *pipelined* links. This is the literal definition in code.
+- The materialized edge's source **output port gets a storage URI** = the concrete document Lesson 3 called
+  "materialize to storage." Downstream region reads that document back.
+
+**Two independent reasons a port gets storage** (both land in `outputPortIdsNeedingStorage`, but only #1
+passes through `removeLink`, so only #1 changes region count):
+1. **Scheduling** — the port is a `matEdge` source (region boundary). **Changes regions.**
+2. **Viewing** — the 👁 "eye-icon"/`outputPortsNeedingStorage` (user wants to inspect that output).
+   **Does NOT change regions** — just adds a readable document. (And if the port is already a `matEdge`
+   source, the eye-icon is free — the URI already exists.)
+
 **One-liner to keep:** *regions = materialization boundaries, chosen by a cost-based search over the
-non-mandatory, non-bridge links.*
+non-mandatory, non-bridge links; a region is literally a connected component once those boundaries are cut.*
+
+---
+
+## Tomorrow's plan
+1. **Revision first (b):** peek at region *execution* — `WorkflowExecutionManager` /
+   `RegionExecutionManager` — how a `Schedule` actually drives actors at runtime (plan → running system).
+   Quick recap of Concepts 1–3 as we go.
+2. **Then Concept 4 (a):** credit-based flow control / backpressure — how concurrently-running *pipelined*
+   operators avoid flooding each other. Files: `messaginglayer/FlowControl.scala`,
+   `pythonworker/PythonWorkflowWorker.scala::handleBackpressure`,
+   `core/architecture/handlers/actorcommand/backpressure_handler.py`, `core/models/internal_queue.py`.
 
 ---
 
@@ -204,12 +236,14 @@ non-mandatory, non-bridge links.*
 |---|---|---|
 | 1 | Logical→Physical plan (ports, links, plan-is-data) | ✅ |
 | 2 | Actor model & identities + worker spawning + config-vs-stats | ✅ |
-| 3 | Region-based scheduling (pipeline vs materialize, walls, bridges, CBO) | 🔶 in progress — next: how link-sets become `Region`/`RegionPlan` objects |
-| 4 | Credit-based flow control / backpressure | ⬜ |
+| 3 | Region-based scheduling (pipeline vs materialize, walls, bridges, CBO, `createRegions`) | ✅ |
+| 4 | Credit-based flow control / backpressure | ⬜ (tomorrow, after revision) |
 | 5 | Scala↔Python Arrow-Flight bridge | ⬜ |
+| R | Revision: region *execution* (`WorkflowExecutionManager`/`RegionExecutionManager`) | ⬜ (tomorrow, first) |
 | — | Capstone: whiteboard `CSV → Python UDF → sort → sink` end-to-end, unaided | ⬜ |
 
-**Open checkpoint (to answer next):** linear chain `CSV → Filter → Sort → Sink`, Sort fed by a blocking
-link, all links are bridges → how many regions, where's the single materialization boundary, and did the
-cost-based search have *any* candidates to deliberate over? (Insight: with only bridges + one mandatory
-wall, the CBO's candidate set is empty — nothing to search.)
+**Checkpoint (answered ✅):** linear chain `CSV → Filter → Sort → Sink`, Sort fed by a blocking link →
+**2 regions** (`{CSV,Filter}` | `{Sort,Sink}`), materialization boundary = **Filter→Sort** (Filter's output
+port gets the storage URI; Sort reads the complete dataset back), and the CBO had **no candidates** — every
+link is a bridge, so after removing the one mandatory wall `getNonBridgeNonBlockingLinks` is empty → nothing
+to search. The CBO only earns its keep on **branching** DAGs (parallel paths create non-bridge links).
