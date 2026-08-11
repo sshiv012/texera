@@ -1,0 +1,5 @@
+# G3 probe: does a repo-level .coderabbit.yaml override the Organization UI?
+# Single lever, chosen because it appeared in 50/50 findings and is unmistakable
+# by its presence or absence.
+reviews:
+  enable_prompt_for_ai_agents: false
