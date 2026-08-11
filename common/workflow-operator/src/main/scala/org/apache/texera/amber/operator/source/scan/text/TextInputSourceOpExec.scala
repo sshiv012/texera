@@ -34,12 +34,11 @@ class TextInputSourceOpExec private[text] (
     (if (desc.attributeType.isSingle) {
        Iterator(desc.textInput)
      } else {
-       // `slice(offset, offset + limit)` overflows Int when the limit is absent
-       // (it defaults to Int.MaxValue) or large, making `until <= from` and
-       // silently yielding no rows.
-       desc.textInput.linesIterator
-         .drop(desc.fileScanOffset.getOrElse(0))
-         .take(desc.fileScanLimit.getOrElse(Int.MaxValue))
+       // Emit the [offset, offset + limit) window of lines in one call.
+       desc.textInput.linesIterator.slice(
+         desc.fileScanOffset.getOrElse(0),
+         desc.fileScanOffset.getOrElse(0) + desc.fileScanLimit.getOrElse(Int.MaxValue)
+       )
      }).map(line =>
       TupleLike(desc.attributeType match {
         case FileAttributeType.SINGLE_STRING => line
