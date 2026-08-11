@@ -60,13 +60,13 @@ jobs:
       github.event.sender.login != 'renovate-bot'
     runs-on: ubuntu-latest
     steps:
-      # pull_request_target and issues both resolve to the trusted base
-      # branch (never the fork head), so checking out the message
-      # templates below is safe. They live in .txt files so editing the
-      # wording does not touch workflow logic.
+      # Check out the pull request's own head so the message templates
+      # match the contributor's branch (a PR that reworded a template
+      # otherwise gets the base branch's copy). They live in .txt files
+      # so editing the wording does not touch workflow logic.
       - uses: actions/checkout@v7
         with:
-          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
           sparse-checkout: |
             .github/welcome-first-time-contributor.txt
             .github/template-compliance-warning.txt
