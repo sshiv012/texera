@@ -209,10 +209,12 @@ object DatasetResource {
       name: String,
       normalizedEmail: String
   ): Integer = {
+    // Match on the lower-cased email so a contributor entered as "A@b.com"
+    // resolves to the account stored as "a@b.com".
     val existing = ctx
       .select(USER.UID)
       .from(USER)
-      .where(DSL.lower(USER.EMAIL).eq(normalizedEmail))
+      .where(DSL.condition(s"lower(\"user\".\"email\") = '$normalizedEmail'"))
       .fetchOne(USER.UID)
     if (existing != null) {
       existing
