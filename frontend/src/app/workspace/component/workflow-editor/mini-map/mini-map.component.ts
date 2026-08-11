@@ -84,6 +84,14 @@ export class MiniMapComponent implements AfterViewInit, OnDestroy {
       });
     this.hidden = JSON.parse(localStorage.getItem("mini-map") as string) || false;
 
+    // Redraw the navigator box when an operator is dragged on the main canvas,
+    // otherwise the minimap keeps showing the pre-drag layout until the next
+    // translate/scale/resize event.
+    this.workflowActionService
+      .getJointGraphWrapper()
+      .getElementPositionChangeEvent()
+      .subscribe(() => this.updateNavigator());
+
     this.panelService.closePanelStream.pipe(untilDestroyed(this)).subscribe(() => (this.hidden = true));
     this.panelService.resetPanelStream.pipe(untilDestroyed(this)).subscribe(() => (this.hidden = false));
   }
