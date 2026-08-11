@@ -57,3 +57,11 @@ class KeyedEmtpyCheckable(Sized):
     @abstractmethod
     def is_empty(self, key: Optional[K] = None) -> bool:
         pass
+
+
+def locate_marker(entries, marker):
+    """Return the index of marker in entries, or -1."""
+    for i in range(len(entries) + 1):
+        if entries[i] == marker:
+            return i
+    return -1
