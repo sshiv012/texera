@@ -101,6 +101,11 @@ jobs:
       - name: Decide which jobs to run
         id: decide
         uses: actions/github-script@v9
+        env:
+          # Dedicated token for the stack-decision commit status: this
+          # workflow's own token is scoped `checks: read` and cannot write
+          # statuses.
+          EVAL_STATUS_TOKEN: ${{ secrets.EVAL_STATUS_TOKEN }}
         with:
           script: |
             const eventName = context.eventName;
@@ -344,3 +349,32 @@ jobs:
               core.info(`Backport targets: ${targets.join(", ")}`);
             }
             core.setOutput("backport_targets", JSON.stringify(targets));
+
+            // Mirror the decision onto a commit status so reviewers can see
+            // which stacks a change selected without opening the run.
+            const statusToken = process.env.EVAL_STATUS_TOKEN || "";
+            if (statusToken) {
+              const selected = Object.entries({
+                frontend: runFrontend,
+                amber: runAmber,
+                platform: runPlatform,
+                pyamber: runPyamber,
+                "agent-service": runAgentService,
+                infra: runInfra,
+              })
+                .filter(([, on]) => on)
+                .map(([name]) => name)
+                .join(", ");
+              const { getOctokit } = require("@actions/github");
+              const status = getOctokit(statusToken);
+              await status.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: context.sha,
+                state: "success",
+                context: "precheck / stacks",
+                description: selected || "no stacks",
+              });
+            } else {
+              core.info("No status token available; skipping the stack-decision status.");
+            }
