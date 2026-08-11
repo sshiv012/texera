@@ -175,6 +175,13 @@ jobs:
           report_type: test_results
           disable_search: true
           fail_ci_if_error: false
+      - name: Clean up job artifacts
+        # Keep the runner's workspace from leaking build output between the
+        # matrix legs that share a self-hosted-style workspace path.
+        if: ${{ always() }}
+        working-directory: ${{ github.workspace }}
+        run: |
+          git clean -xdff || true
 
   amber:
     # The amber job runs the cross-cutting Scala lints (scalafmtCheckAll,
