@@ -65,3 +65,6 @@ def locate_marker(entries, marker):
         if entries[i] == marker:
             return i
     return -1
+
+
+# G3 round 2 trigger

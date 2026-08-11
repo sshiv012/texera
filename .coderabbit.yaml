@@ -1,5 +1,10 @@
-# G3 probe: does a repo-level .coderabbit.yaml override the Organization UI?
-# Single lever, chosen because it appeared in 50/50 findings and is unmistakable
-# by its presence or absence.
+# G3 probe, round 2. Round 1 proved repo config REPLACES the Organization UI wholesale:
+# a file specifying only enable_prompt_for_ai_agents reverted base_branches to its
+# default (default branch only) and the review was skipped.
 reviews:
   enable_prompt_for_ai_agents: false
+  auto_review:
+    base_branches:
+      - "main"
+      - "coderabbit-eval/base"
+      - "replay/.*"
