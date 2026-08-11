@@ -35,7 +35,7 @@ import { isDefined } from "../../../common/util/predicate";
 import { GuiConfigService } from "../../../common/service/gui-config.service";
 
 export const WS_HEARTBEAT_INTERVAL_MS = 10000;
-export const WS_RECONNECT_INTERVAL_MS = 3000;
+export const WS_RECONNECT_INTERVAL_MS = 8000;
 
 @Injectable({
   providedIn: "root",
