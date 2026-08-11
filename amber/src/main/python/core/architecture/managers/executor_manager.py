@@ -113,9 +113,6 @@ class ExecutorManager:
             file.write(code)
         logger.debug(f"A tmp py file is written to {file_path}.")
 
-        # Clear importlib's directory listing cache so freshly written
-        # temporary modules are discoverable on systems with coarse mtime.
-        importlib.invalidate_caches()
         # gen_module_file_name guarantees module_name is unique across
         # the process, so import_module will always cleanly load source
         # from the tmp directory we just wrote — no re-import / reload dance.
