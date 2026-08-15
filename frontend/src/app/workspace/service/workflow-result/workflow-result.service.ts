@@ -42,22 +42,22 @@ import { SchemaAttribute } from "../../types/workflow-compiling.interface";
   providedIn: "root",
 })
 export class WorkflowResultService {
-  private paginatedResultServices = new Map<string, OperatorPaginationResultService>();
-  private operatorResultServices = new Map<string, OperatorResultService>();
+  private paginatedResultServiceByOperator = new Map<string, OperatorPaginationResultService>();
+  private resultServiceByOperator = new Map<string, OperatorResultService>();
 
   // event stream of operator result update, undefined indicates the operator result is cleared
-  private resultUpdateStream = new Subject<Record<string, WebResultUpdate | undefined>>();
+  private resultUpdateSubject = new Subject<Record<string, WebResultUpdate | undefined>>();
   private resultTableStats = new ReplaySubject<Record<string, Record<string, Record<string, number>>>>(1);
-  private resultInitiateStream = new Subject<string>();
+  private resultInitiateSubject = new Subject<string>();
   // emits when clearResults() drops cached results, so the UI can drop stale frames
-  private resultClearedStream = new Subject<void>();
+  private resultClearedSubject = new Subject<void>();
 
-  constructor(private wsService: WorkflowWebsocketService) {
-    this.wsService.subscribeToEvent("WebResultUpdateEvent").subscribe(event => {
+  constructor(private websocketService: WorkflowWebsocketService) {
+    this.websocketService.subscribeToEvent("WebResultUpdateEvent").subscribe(event => {
       this.handleResultUpdate(event.updates);
       this.handleTableStatsUpdate(event.tableStats);
     });
-    this.wsService
+    this.websocketService
       .subscribeToEvent("WorkflowAvailableResultEvent")
       .subscribe(event => this.handleCleanResultCache(event));
     this.resultTableStats.next({});
@@ -75,8 +75,28 @@ export class WorkflowResultService {
     return isDefined(this.getPaginatedResultService(operatorID));
   }
 
+  public getPaginatedResultService(operatorID: string): OperatorPaginationResultService | undefined {
+    return this.paginatedResultServiceByOperator.get(operatorID);
+  }
+
+  public getResultService(operatorID: string): OperatorResultService | undefined {
+    return this.resultServiceByOperator.get(operatorID);
+  }
+
   public getResultUpdateStream(): Observable<Record<string, WebResultUpdate | undefined>> {
-    return this.resultUpdateStream;
+    return this.resultUpdateSubject;
+  }
+
+  public getResultInitiateStream(): Observable<string> {
+    return this.resultInitiateSubject.asObservable();
+  }
+
+  /**
+   * Emits when clearResults() drops cached results, so consumers can tear down
+   * stale frames (clearing the caches alone won't re-render a displayed operator).
+   */
+  public getResultClearedStream(): Observable<void> {
+    return this.resultClearedSubject.asObservable();
   }
 
   public getResultTableStats(): Observable<
@@ -85,50 +105,30 @@ export class WorkflowResultService {
     return this.resultTableStats.pipe(pairwise());
   }
 
-  public getResultInitiateStream(): Observable<string> {
-    return this.resultInitiateStream.asObservable();
-  }
-
-  /**
-   * Emits when clearResults() drops cached results, so consumers can tear down
-   * stale frames (clearing the caches alone won't re-render a displayed operator).
-   */
-  public getResultClearedStream(): Observable<void> {
-    return this.resultClearedStream.asObservable();
-  }
-
-  public getPaginatedResultService(operatorID: string): OperatorPaginationResultService | undefined {
-    return this.paginatedResultServices.get(operatorID);
-  }
-
-  public getResultService(operatorID: string): OperatorResultService | undefined {
-    return this.operatorResultServices.get(operatorID);
-  }
-
   /**
    * Drop cached results and reset table stats so a re-entered workflow doesn't show
    * stale results (resultTableStats is a ReplaySubject, so push an empty snapshot).
-   * Emits resultClearedStream so subscribers tear down already-displayed frames.
+   * Emits resultClearedSubject so subscribers tear down already-displayed frames.
    */
   public clearResults(): void {
-    this.operatorResultServices.clear();
-    this.paginatedResultServices.clear();
+    this.resultServiceByOperator.clear();
+    this.paginatedResultServiceByOperator.clear();
     this.resultTableStats.next({});
-    this.resultClearedStream.next();
+    this.resultClearedSubject.next();
   }
 
   private handleCleanResultCache(event: WorkflowAvailableResultEvent): void {
     const removedOrInvalidatedOperators = new Set<string>();
     // remove operators that no longer have results
-    this.operatorResultServices.forEach((_, op) => {
+    this.resultServiceByOperator.forEach((_, op) => {
       if (!(op in event.availableOperators)) {
-        this.operatorResultServices.delete(op);
+        this.resultServiceByOperator.delete(op);
         removedOrInvalidatedOperators.add(op);
       }
     });
-    this.paginatedResultServices.forEach((_, op) => {
+    this.paginatedResultServiceByOperator.forEach((_, op) => {
       if (!(op in event.availableOperators)) {
-        this.paginatedResultServices.delete(op);
+        this.paginatedResultServiceByOperator.delete(op);
         removedOrInvalidatedOperators.add(op);
       }
     });
@@ -156,7 +156,7 @@ export class WorkflowResultService {
 
     const invalidatedOperatorsUpdate: Record<string, undefined> = {};
     removedOrInvalidatedOperators.forEach(op => (invalidatedOperatorsUpdate[op] = undefined));
-    this.resultUpdateStream.next(invalidatedOperatorsUpdate);
+    this.resultUpdateSubject.next(invalidatedOperatorsUpdate);
   }
 
   private handleResultUpdate(event: WorkflowResultUpdate): void {
@@ -166,15 +166,15 @@ export class WorkflowResultService {
         const paginatedResultService = this.getOrInitPaginatedResultService(operatorID);
         paginatedResultService.handleResultUpdate(update);
         // clear previously saved result service
-        this.operatorResultServices.delete(operatorID);
+        this.resultServiceByOperator.delete(operatorID);
       } else if (isWebDataUpdate(update)) {
         const resultService = this.getOrInitResultService(operatorID);
         resultService.handleResultUpdate(update);
         // clear previously saved paginated result service
-        this.paginatedResultServices.delete(operatorID);
+        this.paginatedResultServiceByOperator.delete(operatorID);
       }
     });
-    this.resultUpdateStream.next(event);
+    this.resultUpdateSubject.next(event);
   }
 
   private handleTableStatsUpdate(event: WorkflowResultTableStats): void {
@@ -188,9 +188,9 @@ export class WorkflowResultService {
   private getOrInitPaginatedResultService(operatorID: string): OperatorPaginationResultService {
     let service = this.getPaginatedResultService(operatorID);
     if (!service) {
-      service = new OperatorPaginationResultService(operatorID, this.wsService);
-      this.paginatedResultServices.set(operatorID, service);
-      this.resultInitiateStream.next(operatorID);
+      service = new OperatorPaginationResultService(operatorID, this.websocketService);
+      this.paginatedResultServiceByOperator.set(operatorID, service);
+      this.resultInitiateSubject.next(operatorID);
     }
     return service;
   }
@@ -199,8 +199,8 @@ export class WorkflowResultService {
     let service = this.getResultService(operatorID);
     if (!service) {
       service = new OperatorResultService(operatorID);
-      this.operatorResultServices.set(operatorID, service);
-      this.resultInitiateStream.next(operatorID);
+      this.resultServiceByOperator.set(operatorID, service);
+      this.resultInitiateSubject.next(operatorID);
     }
     return service;
   }
