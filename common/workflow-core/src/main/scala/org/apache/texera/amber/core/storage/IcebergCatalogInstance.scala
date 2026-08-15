@@ -70,9 +70,14 @@ object IcebergCatalogInstance {
     */
   def getInstance(warehouse: Option[String] = None): Catalog = {
     val name = warehouse.getOrElse(defaultWarehouse)
-    synchronized {
-      catalogs.getOrElseUpdate(cacheKey(name), createCatalog(name))
+    val key = cacheKey(name)
+    // Read the cache outside the lock: building a catalog can block on the
+    // REST endpoint, and holding the monitor for that long stalls every other
+    // warehouse's first access.
+    if (!catalogs.contains(key)) {
+      catalogs.put(key, createCatalog(name))
     }
+    catalogs(key)
   }
 
   private def createCatalog(warehouse: String): Catalog =
