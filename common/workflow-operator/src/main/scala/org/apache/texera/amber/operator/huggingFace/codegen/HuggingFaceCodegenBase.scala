@@ -72,11 +72,10 @@ object HuggingFaceCodegenBase {
        |
        |# Defensive format check for MODEL_ID before it is interpolated into
        |# HF URL paths. The base host is hardcoded so the worst case isn't
-       |# SSRF, but rejecting `..` traversal / query strings / fragments /
-       |# control chars keeps the operator's request shape predictable. The
-       |# leading (?!.*\.\.) rejects any `..`; the trailing /segment group is
-       |# optional so single-segment legacy IDs like `gpt2` are also accepted.
-       |_HF_MODEL_ID_PATTERN = re.compile(r"^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9._-]+)*$$")
+       |# SSRF, but rejecting query strings / fragments / control chars keeps
+       |# the operator's request shape predictable. The trailing /segment group
+       |# is optional so single-segment legacy IDs like `gpt2` are accepted.
+       |_HF_MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9._-]+)*$$")
        |
        |class ProcessTableOperator(UDFTableOperator):
        |
