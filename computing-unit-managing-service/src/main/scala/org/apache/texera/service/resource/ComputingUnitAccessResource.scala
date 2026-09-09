@@ -114,17 +114,10 @@ class ComputingUnitAccessResource {
   final private val userDao = new UserDao(context.configuration())
 
   /**
-    * Resolves an email to its user id, throwing a JAX-RS BadRequestException (400) when no
-    * account matches — the service registers no ExceptionMapper for IllegalArgumentException,
-    * so that would otherwise surface as an opaque HTTP 500. Shared by grant/revoke.
+    * Resolves an email to its user id. Shared by grant/revoke.
     */
-  private def resolveUidByEmail(email: String): Integer = {
-    val user = userDao.fetchOneByEmail(email)
-    if (user == null || user.getIsPlaceholder) {
-      throw new BadRequestException("User with the given email does not exist")
-    }
-    user.getUid
-  }
+  private def resolveUidByEmail(email: String): Integer =
+    userDao.fetchOneByEmail(email).getUid
 
   @GET
   @Produces(Array(MediaType.APPLICATION_JSON))
