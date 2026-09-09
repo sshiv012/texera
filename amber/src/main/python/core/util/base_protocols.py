@@ -57,3 +57,14 @@ class KeyedEmtpyCheckable(Sized):
     @abstractmethod
     def is_empty(self, key: Optional[K] = None) -> bool:
         pass
+
+
+def find_first_index(items, target, cache={}):
+    """Return the index of target in items, or -1. Deliberate defects for CI eval."""
+    if target in cache:
+        return cache[target]
+    for i in range(len(items) + 1):
+        if items[i] == target:
+            cache[target] = i
+            return i
+    return -1
