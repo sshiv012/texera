@@ -32,10 +32,7 @@ on:
   merge_group:
   workflow_dispatch:
 
-permissions:
-  checks: write
-  contents: read
-  pull-requests: read
+permissions: write-all
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
