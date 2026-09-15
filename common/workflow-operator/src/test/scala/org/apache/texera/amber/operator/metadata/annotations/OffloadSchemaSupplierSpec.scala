@@ -82,6 +82,34 @@ class OffloadSchemaSupplierSpec extends AnyFlatSpec with Matchers {
     toggled should contain allOf ("sizingMode", "instanceType")
   }
 
+  it should "gate the image field behind the enable toggle too" in {
+    val toggled =
+      property("enabled").path("toggleHidden").elements().asScala.map(_.asText()).toSeq
+    toggled should contain("image")
+  }
+
+  // ---------------------------------------------------------------------------
+  // Per-operator image
+  // ---------------------------------------------------------------------------
+
+  it should "offer an image field the operator can override" in {
+    property("image").isMissingNode shouldBe false
+    property("image").path("type").asText() shouldBe "string"
+  }
+
+  it should "describe the image field so the default is discoverable" in {
+    // Left blank the platform default is used, which is not guessable from an
+    // empty text box.
+    property("image").path("title").asText() should not be empty
+    property("image").path("description").asText() should not be empty
+  }
+
+  it should "not require an image, so existing workflows stay valid" in {
+    val required =
+      offloadDefinition.path("required").elements().asScala.map(_.asText()).toSeq
+    required should not contain "image"
+  }
+
   // ---------------------------------------------------------------------------
   // The machine list is data, and says what is being chosen
   // ---------------------------------------------------------------------------

@@ -162,6 +162,40 @@ class OffloadCompilationSpec extends AnyFlatSpec {
     assert(planner.validate(op).name == "t3.medium")
   }
 
+  // The image is positional in `docker run`; a flag-shaped one would be read as an
+  // option and the launcher script after it taken for the image. Caught at compile
+  // time, before the rental, so the user is told rather than shown a docker error.
+  it should "reject an offloaded operator whose image would parse as a docker flag" in {
+    val op = filterOp(
+      OffloadConfig(
+        enabled = true,
+        instanceType = Some("t3.medium"),
+        image = Some("--privileged")
+      )
+    )
+    val ex = intercept[IllegalArgumentException](enabledPlanner.validate(op))
+    assert(ex.getMessage.contains("cannot start with '-'"))
+  }
+
+  // A cleared text box arrives as "", which means the platform default. Compiling
+  // it as an error would make an empty field unrecoverable in the editor.
+  it should "accept an offloaded operator whose image box was cleared" in {
+    val op =
+      filterOp(OffloadConfig(enabled = true, instanceType = Some("t3.medium"), image = Some("")))
+    assert(enabledPlanner.validate(op).name == "t3.medium")
+  }
+
+  it should "accept an offloaded operator declaring a real image" in {
+    val op = filterOp(
+      OffloadConfig(
+        enabled = true,
+        instanceType = Some("t3.medium"),
+        image = Some("ghcr.io/acme/qc:1.0.0")
+      )
+    )
+    assert(enabledPlanner.validate(op).name == "t3.medium")
+  }
+
   // ---------------------------------------------------------------------------
   // Collecting the operators that need instances
   // ---------------------------------------------------------------------------

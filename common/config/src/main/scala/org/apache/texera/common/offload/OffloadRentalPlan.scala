@@ -62,7 +62,7 @@ class OffloadRentalPlan(
 ) {
 
   /**
-    * Rents one instance per (operatorId, instanceType), in order.
+    * Rents one instance per rental, in order.
     *
     * Renting is sequential because the Docker provider identifies a container's
     * node by the single new cluster member that appears after its launch;
@@ -72,7 +72,7 @@ class OffloadRentalPlan(
     * before the failure propagates, so a partial failure never leaves the user
     * paying for unused instances.
     */
-  def rentAll(operators: Seq[(String, InstanceType)]): OffloadRentalResult = {
+  def rentAll(operators: Seq[OffloadRental]): OffloadRentalResult = {
     // One accumulator, holding the operator each instance was rented for. Two
     // parallel collections would have to be kept in step by hand, and the
     // money-safety invariant is "everything appended here gets released" -- so a
@@ -84,19 +84,21 @@ class OffloadRentalPlan(
     val addresses = mutable.ListBuffer.empty[(String, String)]
 
     try {
-      operators.foreach {
-        case (operatorId, instanceType) =>
-          val instance = provider.acquire(InstanceRequest(instanceType, operatorId, executionId))
-          // Recorded before the address check: an instance with no address is
-          // still running and billing, so it must be releasable if we throw.
-          rented += operatorId -> instance
-          instance.nodeAddress match {
-            case Some(address) => addresses += operatorId -> address
-            case None =>
-              throw new InstanceProvisioningException(
-                s"Instance ${instance.instanceId} for operator '$operatorId' reported no address."
-              )
-          }
+      operators.foreach { rental =>
+        val operatorId = rental.operatorId
+        val instance = provider.acquire(
+          InstanceRequest(rental.instanceType, operatorId, executionId, rental.image)
+        )
+        // Recorded before the address check: an instance with no address is
+        // still running and billing, so it must be releasable if we throw.
+        rented += operatorId -> instance
+        instance.nodeAddress match {
+          case Some(address) => addresses += operatorId -> address
+          case None =>
+            throw new InstanceProvisioningException(
+              s"Instance ${instance.instanceId} for operator '$operatorId' reported no address."
+            )
+        }
       }
       OffloadRentalResult(rented.map(_._2).toList, addresses.toMap)
     } catch {

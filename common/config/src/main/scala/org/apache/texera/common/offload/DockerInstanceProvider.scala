@@ -191,7 +191,9 @@ class DockerInstanceProvider(
       s"${OffloadWorkerLauncher.AdvertisedHostnameEnv}=$advertisedHost",
       "-e",
       s"${OffloadWorkerLauncher.AdvertisedPortEnv}=$workerPort",
-      image,
+      // An operator may bring its own image, so long as that image still launches
+      // the worker below; the configured one is the default for everything else.
+      request.image.getOrElse(image),
       OffloadWorkerLauncher.WorkerLauncherScript,
       OffloadWorkerLauncher.SeedAddressFlag,
       seedAddress

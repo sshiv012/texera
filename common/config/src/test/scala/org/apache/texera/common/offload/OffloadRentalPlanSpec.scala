@@ -41,6 +41,7 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
       failOnOperator: Option[String] = None
   ) extends InstanceProvider {
     val acquiredFor: mutable.ListBuffer[String] = mutable.ListBuffer.empty
+    val requests: mutable.ListBuffer[InstanceRequest] = mutable.ListBuffer.empty
     val released: mutable.ListBuffer[String] = mutable.ListBuffer.empty
     private var n = 0
 
@@ -52,6 +53,7 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
       }
       n += 1
       acquiredFor += request.operatorId
+      requests += request
       RentedInstance(s"inst-$n", request.instanceType, Some(s"pekko://Amber@10.0.0.$n:2552"), name)
     }
 
@@ -70,7 +72,7 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
   "rentAll" should "rent one instance per operator and map each to its address" in {
     val provider = new RecordingProvider()
     val result = rentalPlan(provider).rentAll(
-      Seq("Op-A" -> decision("t3.medium"), "Op-B" -> decision("m5.large"))
+      Seq(OffloadRental("Op-A", decision("t3.medium")), OffloadRental("Op-B", decision("m5.large")))
     )
     assert(result.addresses.keySet == Set("Op-A", "Op-B"))
     assert(result.addresses("Op-A") == "pekko://Amber@10.0.0.1:2552")
@@ -85,9 +87,9 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
     val provider = new RecordingProvider()
     rentalPlan(provider).rentAll(
       Seq(
-        "Op-A" -> decision("t3.medium"),
-        "Op-B" -> decision("t3.medium"),
-        "Op-C" -> decision("t3.medium")
+        OffloadRental("Op-A", decision("t3.medium")),
+        OffloadRental("Op-B", decision("t3.medium")),
+        OffloadRental("Op-C", decision("t3.medium"))
       )
     )
     assert(provider.acquiredFor.toList == List("Op-A", "Op-B", "Op-C"))
@@ -103,8 +105,19 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
 
   it should "carry the chosen instance type into the rental request" in {
     val provider = new RecordingProvider()
-    val result = rentalPlan(provider).rentAll(Seq("Op-A" -> decision("m5.large")))
+    val result = rentalPlan(provider).rentAll(Seq(OffloadRental("Op-A", decision("m5.large"))))
     assert(result.instances.head.instanceType.name == "m5.large")
+  }
+
+  it should "carry a per-operator image into the rental request, and none when unset" in {
+    val provider = new RecordingProvider()
+    rentalPlan(provider).rentAll(
+      Seq(
+        OffloadRental("Op-A", decision("m5.large"), Some("ghcr.io/acme/qc:1.0.0")),
+        OffloadRental("Op-B", decision("m5.large"))
+      )
+    )
+    assert(provider.requests.map(_.image).toList == List(Some("ghcr.io/acme/qc:1.0.0"), None))
   }
 
   // ---------------------------------------------------------------------------
@@ -118,9 +131,9 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
     val ex = intercept[InstanceProvisioningException] {
       rentalPlan(provider).rentAll(
         Seq(
-          "Op-A" -> decision("t3.medium"),
-          "Op-B" -> decision("t3.medium"),
-          "Op-C" -> decision("t3.medium")
+          OffloadRental("Op-A", decision("t3.medium")),
+          OffloadRental("Op-B", decision("t3.medium")),
+          OffloadRental("Op-C", decision("t3.medium"))
         )
       )
     }
@@ -131,7 +144,7 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
   it should "release nothing when the first rental fails" in {
     val provider = new RecordingProvider(failOnOperator = Some("Op-A"))
     assertThrows[InstanceProvisioningException] {
-      rentalPlan(provider).rentAll(Seq("Op-A" -> decision("t3.medium")))
+      rentalPlan(provider).rentAll(Seq(OffloadRental("Op-A", decision("t3.medium"))))
     }
     assert(provider.released.isEmpty)
   }
@@ -150,7 +163,10 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
     }
     assertThrows[InterruptedException] {
       rentalPlan(provider).rentAll(
-        Seq("Op-A" -> decision("t3.medium"), "Op-B" -> decision("t3.medium"))
+        Seq(
+          OffloadRental("Op-A", decision("t3.medium")),
+          OffloadRental("Op-B", decision("t3.medium"))
+        )
       )
     }
     assert(provider.released.toList == List("inst-1"), "Op-A's instance must be released")
@@ -166,7 +182,7 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
       }
     }
     assertThrows[InstanceProvisioningException] {
-      rentalPlan(provider).rentAll(Seq("Op-A" -> decision("t3.medium")))
+      rentalPlan(provider).rentAll(Seq(OffloadRental("Op-A", decision("t3.medium"))))
     }
     assert(provider.released.toList == List("inst-1"))
   }
@@ -178,7 +194,10 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
   "releaseAll" should "release every rented instance" in {
     val provider = new RecordingProvider()
     val result = rentalPlan(provider).rentAll(
-      Seq("Op-A" -> decision("t3.medium"), "Op-B" -> decision("t3.medium"))
+      Seq(
+        OffloadRental("Op-A", decision("t3.medium")),
+        OffloadRental("Op-B", decision("t3.medium"))
+      )
     )
     rentalPlan(provider).releaseAll(result.instances)
     assert(provider.released.toSet == Set("inst-1", "inst-2"))
@@ -193,7 +212,10 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
       }
     }
     val result = rentalPlan(provider).rentAll(
-      Seq("Op-A" -> decision("t3.medium"), "Op-B" -> decision("t3.medium"))
+      Seq(
+        OffloadRental("Op-A", decision("t3.medium")),
+        OffloadRental("Op-B", decision("t3.medium"))
+      )
     )
     rentalPlan(provider).releaseAll(result.instances)
     assert(provider.released.contains("inst-2"))
@@ -225,7 +247,7 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
     val provider = new RecordingProvider()
     val announced = mutable.ListBuffer.empty[String]
     val plan = announcingPlan(provider, announced)
-    val result = plan.rentAll(Seq("Op-A" -> decision("t3.medium")))
+    val result = plan.rentAll(Seq(OffloadRental("Op-A", decision("t3.medium"))))
     plan.releaseAll(result.instances)
     assert(announced.toList == List("pekko://Amber@10.0.0.1:2552"))
   }
@@ -237,7 +259,10 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
     val announced = mutable.ListBuffer.empty[String]
     assertThrows[InstanceProvisioningException] {
       announcingPlan(provider, announced).rentAll(
-        Seq("Op-A" -> decision("t3.medium"), "Op-B" -> decision("t3.medium"))
+        Seq(
+          OffloadRental("Op-A", decision("t3.medium")),
+          OffloadRental("Op-B", decision("t3.medium"))
+        )
       )
     }
     assert(provider.released.toList == List("inst-1"))
@@ -252,7 +277,7 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
     }
     val announced = mutable.ListBuffer.empty[String]
     assertThrows[InstanceProvisioningException] {
-      announcingPlan(provider, announced).rentAll(Seq("Op-A" -> decision("t3.medium")))
+      announcingPlan(provider, announced).rentAll(Seq(OffloadRental("Op-A", decision("t3.medium"))))
     }
     assert(provider.released.toList == List("inst-1"), "it still has to be released")
     assert(announced.isEmpty)
@@ -270,7 +295,10 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
     }
     val plan = rentalPlan(provider)
     val result = plan.rentAll(
-      Seq("Op-A" -> decision("t3.medium"), "Op-B" -> decision("t3.medium"))
+      Seq(
+        OffloadRental("Op-A", decision("t3.medium")),
+        OffloadRental("Op-B", decision("t3.medium"))
+      )
     )
     plan.releaseAll(result.instances)
     assert(provider.released.toList == List("inst-2"), "inst-2 must still be released")
@@ -283,7 +311,7 @@ class OffloadRentalPlanSpec extends AnyFlatSpec {
       executionId = 1L,
       beforeRelease = _ => throw new RuntimeException("listener unavailable")
     )
-    val result = plan.rentAll(Seq("Op-A" -> decision("t3.medium")))
+    val result = plan.rentAll(Seq(OffloadRental("Op-A", decision("t3.medium"))))
     plan.releaseAll(result.instances)
     assert(provider.released.toList == List("inst-1"))
   }

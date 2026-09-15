@@ -68,6 +68,20 @@ object OffloadSchemaSupplier {
       val toggles = enabled.putArray("toggleHidden")
       toggles.add("sizingMode")
       toggles.add("instanceType")
+      toggles.add("image")
+    }
+
+    // The image is free text, not an enum: unlike the instance catalog, the
+    // platform has no list of images it may run -- any registry reference the
+    // Docker daemon can pull is valid. What it cannot be is silently empty, so
+    // the description states what blank means.
+    Option(props.get("image")).collect { case o: ObjectNode => o }.foreach { image =>
+      image.put("title", "Container image")
+      image.put(
+        "description",
+        "Image this operator's machine runs; leave blank for the platform default. " +
+          "A custom image must still launch the Texera worker."
+      )
     }
 
     // Only the modes that can actually provision are offered. Advised sizing needs

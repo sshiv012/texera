@@ -55,6 +55,8 @@ class RuntimeOffloadOrchestratorSpec extends AnyFlatSpec {
 
   private class FakeProvider(failOnOperator: Option[String] = None) extends InstanceProvider {
     val acquiredFor: mutable.ListBuffer[String] = mutable.ListBuffer.empty
+    // The whole request, so the image the orchestrator resolved can be asserted on.
+    val requests: mutable.ListBuffer[InstanceRequest] = mutable.ListBuffer.empty
     val released: mutable.ListBuffer[String] = mutable.ListBuffer.empty
     private var n = 0
     override def name: String = "fake"
@@ -63,6 +65,7 @@ class RuntimeOffloadOrchestratorSpec extends AnyFlatSpec {
         throw new InstanceProvisioningException(s"boom ${request.operatorId}")
       n += 1
       acquiredFor += request.operatorId
+      requests += request
       RentedInstance(s"inst-$n", request.instanceType, Some(s"pekko://Amber@10.0.0.$n:2552"), name)
     }
     override def release(instance: RentedInstance): Unit = released += instance.instanceId
@@ -134,6 +137,50 @@ class RuntimeOffloadOrchestratorSpec extends AnyFlatSpec {
     val filterOps = pinned.operators.filter(_.id.logicalOpId == filter.operatorIdentifier)
     assert(filterOps.nonEmpty)
     assert(filterOps.forall(_.locationPreference.exists(_.isInstanceOf[PreferPinnedAddress])))
+  }
+
+  // ---------------------------------------------------------------------------
+  // prepare: the per-operator image reaches the rental
+  // ---------------------------------------------------------------------------
+
+  it should "carry an operator's declared image into its rental request" in {
+    val filter = filterOp(
+      OffloadConfig(
+        enabled = true,
+        instanceType = Some(realInstance),
+        image = Some("ghcr.io/acme/qc:1.0.0")
+      )
+    )
+    val (logicalOps, plan) = compile(filter)
+    val provider = new FakeProvider()
+
+    orchestrator(provider).prepare(logicalOps, plan)
+
+    assert(provider.requests.map(_.image).toList == List(Some("ghcr.io/acme/qc:1.0.0")))
+  }
+
+  it should "send no image when the operator declares none, so the default applies" in {
+    val filter = filterOp(OffloadConfig(enabled = true, instanceType = Some(realInstance)))
+    val (logicalOps, plan) = compile(filter)
+    val provider = new FakeProvider()
+
+    orchestrator(provider).prepare(logicalOps, plan)
+
+    assert(provider.requests.map(_.image).toList == List(None))
+  }
+
+  // The orchestrator must read resolvedImage, not the raw field: a cleared text
+  // box arrives as "", and InstanceRequest refuses a blank image -- so a
+  // regression here would throw mid-rentAll, after the first instance is rented.
+  it should "treat a cleared image box as no image rather than failing the rental" in {
+    val filter =
+      filterOp(OffloadConfig(enabled = true, instanceType = Some(realInstance), image = Some("")))
+    val (logicalOps, plan) = compile(filter)
+    val provider = new FakeProvider()
+
+    orchestrator(provider).prepare(logicalOps, plan)
+
+    assert(provider.requests.map(_.image).toList == List(None))
   }
 
   it should "leave the plan unchanged and rent nothing when no operator is offloaded" in {

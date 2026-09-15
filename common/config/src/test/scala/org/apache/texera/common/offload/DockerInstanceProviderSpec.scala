@@ -298,4 +298,39 @@ class DockerInstanceProviderSpec extends AnyFlatSpec {
     p.release(rented)
     assert(cli.removed.contains("container-abc123"))
   }
+
+  // ---------------------------------------------------------------------------
+  // Per-operator image
+  // ---------------------------------------------------------------------------
+
+  "the docker run command" should "run the per-operator image when the request declares one" in {
+    val cli = new FakeDockerCli()
+    val perOperatorImage = "ghcr.io/sshiv012/texera-tiny-workflow-qc:1.0.0"
+    provider(cli).acquire(
+      InstanceRequest(
+        instanceType = fourGiB,
+        operatorId = "Op-1",
+        executionId = 7L,
+        image = Some(perOperatorImage)
+      )
+    )
+    val cmd = cli.runCommands.head
+    // The image is positional: it must sit immediately before the launcher
+    // script, or docker would read it as another flag's value.
+    val scriptIdx = cmd.indexOf(OffloadWorkerLauncher.WorkerLauncherScript)
+    assert(scriptIdx > 0, "launcher script must be present")
+    assert(cmd(scriptIdx - 1) == perOperatorImage)
+    assert(
+      !cmd.contains("texera-computing-unit-worker:latest"),
+      "the configured default must not also appear"
+    )
+  }
+
+  it should "fall back to the configured image when the request declares none" in {
+    val cli = new FakeDockerCli()
+    provider(cli).acquire(request())
+    val cmd = cli.runCommands.head
+    val scriptIdx = cmd.indexOf(OffloadWorkerLauncher.WorkerLauncherScript)
+    assert(cmd(scriptIdx - 1) == "texera-computing-unit-worker:latest")
+  }
 }

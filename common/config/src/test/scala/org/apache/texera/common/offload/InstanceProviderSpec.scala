@@ -89,6 +89,41 @@ class InstanceProviderSpec extends AnyFlatSpec {
     )
   }
 
+  it should "reject a blank image, which must be normalised to None before here" in {
+    assertThrows[IllegalArgumentException](
+      InstanceRequest(catalog.byName("local-2g").get, "Op-1", 1L, image = Some("  "))
+    )
+  }
+
+  // The stored string is what reaches `docker run`, so it is the string that gets
+  // validated. An untrimmed one would otherwise pass and fail as `invalid
+  // reference format` only after an instance had been rented.
+  it should "reject an untrimmed image rather than renting and failing on docker" in {
+    assertThrows[IllegalArgumentException](
+      InstanceRequest(
+        catalog.byName("local-2g").get,
+        "Op-1",
+        1L,
+        image = Some(" ghcr.io/acme/qc:1 ")
+      )
+    )
+  }
+
+  // `docker run` reads its image positionally, so an image starting with `-` is
+  // taken for a flag and the launcher script after it for the image. Refuse to
+  // build that command rather than emit one that means something else.
+  it should "reject an image that would be parsed as a docker flag" in {
+    assertThrows[IllegalArgumentException](
+      InstanceRequest(catalog.byName("local-2g").get, "Op-1", 1L, image = Some("--privileged"))
+    )
+  }
+
+  it should "accept an ordinary registry reference" in {
+    val request =
+      InstanceRequest(catalog.byName("local-2g").get, "Op-1", 1L, image = Some("ghcr.io/acme/qc:1"))
+    assert(request.image.contains("ghcr.io/acme/qc:1"))
+  }
+
   "RentedInstance" should "reject a blank instance id" in {
     assertThrows[IllegalArgumentException](
       RentedInstance("", catalog.byName("local-2g").get, None, "fake")

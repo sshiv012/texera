@@ -45,6 +45,17 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize
   *                     cannot change the outcome is worse than no control. The
   *                     field and its plumbing stay so the memory advisor can
   *                     expose it once the number means something.
+  * @param image        image the rented instance runs, letting one operator bring
+  *                     its own tooling instead of the platform default. The image
+  *                     must still launch the Texera worker, since the instance
+  *                     becomes usable only by joining the cluster. None means
+  *                     "use offload.docker-image", which is what every workflow
+  *                     saved before this field existed carries.
+  *
+  *                     Read it through [[resolvedImage]] rather than directly:
+  *                     the panel renders this as a free-text box, and a box the
+  *                     user typed in and then cleared serializes as "", which
+  *                     means the default just as much as an absent field does.
   */
 @JsonIgnoreProperties(ignoreUnknown = true)
 case class OffloadConfig(
@@ -55,7 +66,11 @@ case class OffloadConfig(
     // the schema generator emits a $ref to the empty `Object` definition and the
     // property panel can never hold a number.
     @JsonDeserialize(contentAs = classOf[java.lang.Double])
-    safetyFactor: Option[Double] = None
+    safetyFactor: Option[Double] = None,
+    // Option[String] needs no explicit content type: String is not erased to
+    // Object the way a boxed Double is, so the schema generator emits a real
+    // string property.
+    image: Option[String] = None
 ) {
   require(
     instanceType.forall(_.trim.nonEmpty),
@@ -65,6 +80,18 @@ case class OffloadConfig(
 
   @JsonIgnore
   def isOffloaded: Boolean = enabled
+
+  /**
+    * The declared image, or None to mean the platform default.
+    *
+    * Blank collapses to None rather than failing: `instanceType` can afford a
+    * constructor `require` because its schema carries an `enum`, so the browser
+    * rejects "" long before Jackson sees it. `image` is a free-text box with no
+    * enum and no minLength, so a user who types in it and clears it saves
+    * `"image": ""` -- and an empty box means the default, not a broken workflow.
+    */
+  @JsonIgnore
+  def resolvedImage: Option[String] = image.map(_.trim).filter(_.nonEmpty)
 
   /**
     * Why this configuration cannot be provisioned, if it cannot.
@@ -77,6 +104,12 @@ case class OffloadConfig(
     if (!enabled) None
     else if (sizingMode == SizingMode.MANUAL && instanceType.isEmpty)
       Some("An instance type must be selected when sizing mode is Manual.")
+    // The image is a positional argument to `docker run`, so one starting with
+    // `-` is read as a flag and the launcher script after it is taken for the
+    // image. Caught here, at compile time, so the user is told what is wrong
+    // instead of watching the rental fail with a docker usage error.
+    else if (resolvedImage.exists(_.startsWith("-")))
+      Some("A container image cannot start with '-'.")
     else None
   }
 }

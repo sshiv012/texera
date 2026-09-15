@@ -30,6 +30,7 @@ import org.apache.texera.common.config.OffloadConfigSettings
 import org.apache.texera.common.offload.{
   DockerInstanceProvider,
   InstanceProvider,
+  OffloadRental,
   OffloadRentalPlan,
   RentedInstance,
   ShellDockerCli
@@ -83,12 +84,20 @@ class RuntimeOffloadOrchestrator(
     if (offloaded.isEmpty) return physicalPlan
 
     // validate() resolves the concrete instance (Manual today; Advised once the
-    // memory advisor supplies an estimate).
-    val decisions = offloaded.map(op => op.operatorIdentifier.id -> planner.validate(op))
+    // memory advisor supplies an estimate). resolvedImage, not the raw field: a
+    // cleared text box arrives as "" and means the platform default.
+    val decisions = offloaded.map(op =>
+      OffloadRental(op.operatorIdentifier.id, planner.validate(op), op.offload.resolvedImage)
+    )
 
     logger.info(
       s"Offloading ${decisions.size} operator(s) for execution $executionId: " +
-        decisions.map { case (id, instanceType) => s"$id -> ${instanceType.name}" }.mkString(", ")
+        decisions
+          .map(rental =>
+            s"${rental.operatorId} -> ${rental.instanceType.name}" +
+              rental.image.map(image => s" on $image").getOrElse("")
+          )
+          .mkString(", ")
     )
 
     val result = rentalPlan.rentAll(decisions)

@@ -70,6 +70,64 @@ class OffloadConfigSpec extends AnyFlatSpec {
     )
   }
 
+  // ---------------------------------------------------------------------------
+  // Per-operator image
+  // ---------------------------------------------------------------------------
+
+  it should "carry a per-operator image when one is declared" in {
+    val cfg = OffloadConfig(
+      enabled = true,
+      instanceType = Some("local-4g"),
+      image = Some("ghcr.io/sshiv012/texera-tiny-workflow-qc:1.0.0")
+    )
+    assert(cfg.resolvedImage.contains("ghcr.io/sshiv012/texera-tiny-workflow-qc:1.0.0"))
+  }
+
+  it should "leave the image unset by default so the platform default applies" in {
+    assert(OffloadConfig(enabled = true, instanceType = Some("local-4g")).resolvedImage.isEmpty)
+  }
+
+  // The panel renders the image as a free-text box, and unlike instanceType its
+  // schema carries no enum, so Ajv passes "" straight through to the backend. A
+  // box the user typed in and cleared must mean the default, not a workflow that
+  // no longer deserializes.
+  it should "read a blank image as unset rather than failing" in {
+    assert(OffloadConfig(enabled = true, image = Some("")).resolvedImage.isEmpty)
+    assert(OffloadConfig(enabled = true, image = Some("   ")).resolvedImage.isEmpty)
+  }
+
+  it should "deserialize a cleared image box without throwing" in {
+    val json = """{"enabled":true,"instanceType":"local-4g","image":""}"""
+    val restored = mapper.readValue(json, classOf[OffloadConfig])
+    assert(restored.resolvedImage.isEmpty)
+    assert(restored.validationError.isEmpty)
+  }
+
+  it should "trim surrounding whitespace off a declared image" in {
+    assert(
+      OffloadConfig(enabled = true, image = Some("  ghcr.io/acme/qc:1.0.0  ")).resolvedImage
+        .contains("ghcr.io/acme/qc:1.0.0")
+    )
+  }
+
+  // An image is positional in `docker run`; one starting with `-` is read as a
+  // flag, and the launcher script after it is taken for the image.
+  it should "reject an image that would be parsed as a docker flag" in {
+    val cfg =
+      OffloadConfig(enabled = true, instanceType = Some("local-4g"), image = Some("--privileged"))
+    assert(cfg.validationError.contains("A container image cannot start with '-'."))
+  }
+
+  it should "not reject a flag-shaped image on an operator that is not offloaded" in {
+    assert(OffloadConfig(enabled = false, image = Some("--privileged")).validationError.isEmpty)
+  }
+
+  it should "deserialize an image from workflow JSON" in {
+    val json = """{"enabled":true,"instanceType":"local-4g","image":"ghcr.io/acme/qc:1.0.0"}"""
+    val restored = mapper.readValue(json, classOf[OffloadConfig])
+    assert(restored.resolvedImage.contains("ghcr.io/acme/qc:1.0.0"))
+  }
+
   it should "require an instance type when enabled in Manual mode" in {
     // Manual mode means the user picked the size; with nothing picked there is
     // no size to rent, so this must fail at validation rather than at run time.

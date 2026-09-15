@@ -143,6 +143,7 @@ In the property panel, under **Run on a rented instance**:
 | **Enabled** | on — the size fields appear only once this is checked |
 | **How to size it** | `Manual` (the only mode until the memory advisor lands) |
 | **Machine size** | e.g. `local-1g — 1 GiB · free` |
+| **Container image** | leave blank to use `OFFLOAD_DOCKER_IMAGE` |
 
 Each option states its memory and cost, read from the instance catalog in
 `offload.conf`. Memory is the constraint that decides whether the run survives;
@@ -153,6 +154,33 @@ failure deliberately later.
 
 > Leaving **Machine size** empty with the toggle on is a per-operator error in the
 > editor, before anything is rented.
+
+### Bringing your own image
+
+**Container image** overrides `OFFLOAD_DOCKER_IMAGE` for this one operator, so it
+can carry tooling the platform image does not. Blank means the platform default —
+a box you type in and then clear is the same as one you never touched.
+
+The override is not a free hand. The image's entry point must still launch the
+Texera worker, because a rented instance is usable only once it joins the Pekko
+cluster; an image that starts and never joins is torn down at the join timeout and
+the run fails. Build on the worker image from [step 1](#1-build-the-worker-image):
+
+```dockerfile
+FROM texera-computing-unit-worker:latest
+RUN pip install --no-cache-dir pandas-profiling
+```
+
+```bash
+docker build -f my-operator.dockerfile -t ghcr.io/me/texera-qc:1.0.0 .
+```
+
+Then set **Container image** to `ghcr.io/me/texera-qc:1.0.0`. The daemon must be
+able to pull it — for a private registry, `docker login` on the machine running the
+coordinator, since the rental shells out to that host's `docker`.
+
+> The image is a positional argument to `docker run`, so one starting with `-`
+> would be read as a flag. The editor rejects that before anything is rented.
 
 ## 7. Run it, and watch the container
 
@@ -242,3 +270,8 @@ pg_stop
   rather than silently not offloading.
 - A container that joins *just after* its join timeout is torn down before its
   address is known, so that departure still reads as a crash.
+- **Any image an operator names is run as-is.** There is no registry allowlist, so
+  with offloading on, anyone who can edit a workflow can have the coordinator's
+  docker daemon pull and run an image of their choosing. Acceptable while this is
+  a research prototype that is off by default; a shared deployment wants the
+  override restricted to trusted registries first.
