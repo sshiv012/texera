@@ -1775,6 +1775,53 @@ describe("OperatorPropertyEditFrameComponent", () => {
       const sizingMode = getField("offload")?.fieldGroup?.find(f => f.key === "sizingMode");
       expect(sizingMode?.type).not.toBe("input");
     });
+
+    // Progressive disclosure: one checkbox until offloading is on. The gating has
+    // to be declared per field (hideTarget/hideType/hideExpectedValue), because
+    // toggleHidden is read only from the schema's TOP-LEVEL properties and
+    // resolved against the top-level fieldGroup -- so a toggleHidden list on a
+    // nested `enabled` is silently ignored and every field renders regardless.
+    // These pin the mechanism that does work from inside the nested group.
+    const gatedOffloadSchema: CustomJSONSchema7 = {
+      type: "object",
+      properties: {
+        offload: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean", title: "Enabled" },
+            image: {
+              type: "string",
+              title: "Container image",
+              hideTarget: "enabled",
+              hideType: "equals",
+              hideExpectedValue: "false",
+              hideOnNull: true,
+            },
+          },
+        } as CustomJSONSchema7,
+      },
+    };
+
+    function offloadHideFn(key: string): Function {
+      component.setFormlyFormBinding(gatedOffloadSchema);
+      const field = getField("offload")?.fieldGroup?.find(f => f.key === key);
+      return (field?.expressions as Record<string, Function>)["hide"];
+    }
+
+    it("hides a nested offload field until the enable checkbox is ticked", () => {
+      const hide = offloadHideFn("image");
+      expect(hide).toBeDefined();
+      // Resolved against the enclosing group's model -- offload.enabled -- not
+      // the operator's top-level model.
+      expect(hide({ parent: { model: { enabled: false } } } as FormlyFieldConfig)).toBe(true);
+      expect(hide({ parent: { model: { enabled: true } } } as FormlyFieldConfig)).toBe(false);
+    });
+
+    it("hides a nested offload field on an operator saved before the block existed", () => {
+      // No `enabled` in the model at all; hideOnNull is what keeps these off the
+      // panel of every operator that predates the feature.
+      expect(offloadHideFn("image")({ parent: { model: {} } } as FormlyFieldConfig)).toBe(true);
+    });
   });
 
   // ──────────────────────────────────────────────────────────────────────────

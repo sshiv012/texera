@@ -76,16 +76,38 @@ class OffloadSchemaSupplierSpec extends AnyFlatSpec with Matchers {
   // Progressive disclosure: one checkbox until offloading is on
   // ---------------------------------------------------------------------------
 
-  it should "gate the sizing fields behind the enable toggle" in {
-    val toggled =
-      property("enabled").path("toggleHidden").elements().asScala.map(_.asText()).toSeq
-    toggled should contain allOf ("sizingMode", "instanceType")
+  // Asserted on each gated field, not as a list on `enabled`. The panel reads
+  // `toggleHidden` only from the schema's top-level properties, and this whole
+  // block is a nested definition, so the list form is inert -- which is exactly
+  // what these assertions exist to keep from coming back.
+  private val gatedFields = Seq("sizingMode", "instanceType", "image")
+
+  it should "gate every dependent field behind the enable toggle" in {
+    gatedFields.foreach { name =>
+      withClue(s"$name: ") {
+        property(name).path("hideTarget").asText() shouldBe "enabled"
+        property(name).path("hideType").asText() shouldBe "equals"
+        property(name).path("hideExpectedValue").asText() shouldBe "false"
+      }
+    }
   }
 
-  it should "gate the image field behind the enable toggle too" in {
-    val toggled =
-      property("enabled").path("toggleHidden").elements().asScala.map(_.asText()).toSeq
-    toggled should contain("image")
+  // An operator saved before this block existed has no `enabled` in its model at
+  // all; without this the fields would show on every one of them.
+  it should "keep the dependent fields hidden when there is no enabled value yet" in {
+    gatedFields.foreach { name =>
+      withClue(s"$name: ")(property(name).path("hideOnNull").asBoolean() shouldBe true)
+    }
+  }
+
+  it should "not gate the enable toggle behind itself" in {
+    property("enabled").path("hideTarget").isMissingNode shouldBe true
+  }
+
+  // The keyword the panel cannot honour from here. Leaving it behind would read
+  // as working gating to the next person touching this file.
+  it should "not rely on toggleHidden, which is inert inside a nested definition" in {
+    property("enabled").path("toggleHidden").isMissingNode shouldBe true
   }
 
   // ---------------------------------------------------------------------------

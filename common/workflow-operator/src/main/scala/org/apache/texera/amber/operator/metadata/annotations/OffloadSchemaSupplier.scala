@@ -40,12 +40,35 @@ import org.apache.texera.common.offload.InstanceType
   *    option carries the memory and price that drive it, so the trade-off is
   *    visible where the decision is made instead of buried in a config file.
   *  - `enabled` gates the rest: an operator that is not offloaded should show one
-  *    checkbox, not a form.
+  *    checkbox, not a form. See [[hideUnlessEnabled]] for why that gating cannot
+  *    be expressed with `toggleHidden` from inside a nested definition.
   */
 object OffloadSchemaSupplier {
 
   /** Name of the generated definition this shapes. */
   private val DefinitionName = "OffloadConfig"
+
+  /**
+    * Hides `field` whenever the sibling `enabled` checkbox is not ticked.
+    *
+    * `toggleHidden`, the other hiding keyword in this codebase, cannot do this:
+    * the panel reads it only from the schema's top-level `properties`, resolving
+    * the named fields against the top-level `fieldGroup`
+    * (operator-property-edit-frame.component.ts, setFormlyFormBinding). Everything
+    * here lives inside the nested `OffloadConfig` definition, so a `toggleHidden`
+    * on `enabled` is never looked at and every field renders unconditionally.
+    *
+    * The hide* keywords are read per field as the schema is mapped, and resolve
+    * their target against `field.parent.model` -- the enclosing group's model,
+    * which for these fields is the offload block. `hideOnNull` covers an operator
+    * saved before this block existed, whose model has no `enabled` at all.
+    */
+  private def hideUnlessEnabled(field: ObjectNode): Unit = {
+    field.put(HideAnnotation.hideTarget, "enabled")
+    field.put(HideAnnotation.hideType, HideAnnotation.Type.equals)
+    field.put(HideAnnotation.hideExpectedValue, "false")
+    field.put(HideAnnotation.hideOnNull, true)
+  }
 
   /**
     * Rewrites the `OffloadConfig` definition in place, if the schema has one.
@@ -61,15 +84,15 @@ object OffloadSchemaSupplier {
     if (!properties.isObject) return
     val props = properties.asInstanceOf[ObjectNode]
 
-    // One checkbox until offloading is on. `toggleHidden` belongs on the field
-    // that does the gating, which the frontend reads to build a hide expression.
+    // One checkbox until offloading is on. The gating is declared on each gated
+    // field rather than as a list on `enabled`; see hideUnlessEnabled for why the
+    // list form cannot work from inside a nested definition.
     Option(props.get("enabled")).collect { case o: ObjectNode => o }.foreach { enabled =>
       enabled.put("description", "Rent a machine for this operator when the workflow runs")
-      val toggles = enabled.putArray("toggleHidden")
-      toggles.add("sizingMode")
-      toggles.add("instanceType")
-      toggles.add("image")
     }
+    Seq("sizingMode", "instanceType", "image")
+      .flatMap(name => Option(props.get(name)).collect { case o: ObjectNode => o })
+      .foreach(hideUnlessEnabled)
 
     // The image is free text, not an enum: unlike the instance catalog, the
     // platform has no list of images it may run -- any registry reference the
