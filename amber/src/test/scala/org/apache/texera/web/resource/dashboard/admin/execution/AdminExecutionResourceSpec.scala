@@ -93,7 +93,6 @@ class AdminExecutionResourceSpec
     testUser.setUid(testUid)
     testUser.setName("test_user")
     testUser.setEmail("admin_exec_test@example.com")
-    testUser.setPassword("password")
 
     testWorkflow = new Workflow
     testWorkflow.setWid(testWid)
@@ -275,6 +274,17 @@ class AdminExecutionResourceSpec
 
     rows should have size 1
     rows.head.access shouldBe false
+  }
+
+  it should "report access = true for the owner without an access row" in {
+    seedExecution()
+    getDSLContext
+      .insertInto(WORKFLOW_OF_USER)
+      .set(WORKFLOW_OF_USER.UID, Integer.valueOf(testUid))
+      .set(WORKFLOW_OF_USER.WID, Integer.valueOf(testWid))
+      .execute()
+
+    list().head.access shouldBe true
   }
 
   it should "keep only the latest execution per workflow" in {

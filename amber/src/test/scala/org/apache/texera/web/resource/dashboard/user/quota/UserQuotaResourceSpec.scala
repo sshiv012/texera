@@ -46,6 +46,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 
 import java.sql.Timestamp
 import java.util.UUID
+import scala.jdk.CollectionConverters._
 
 class UserQuotaResourceSpec extends AnyFlatSpec with BeforeAndAfterAll with MockTexeraDB {
 
@@ -88,7 +89,6 @@ class UserQuotaResourceSpec extends AnyFlatSpec with BeforeAndAfterAll with Mock
     testUser.setUid(testUid)
     testUser.setName("quota_user")
     testUser.setEmail("quota@example.com")
-    testUser.setPassword("password")
     userDao.insert(testUser)
 
     testWorkflow = new Workflow
@@ -233,6 +233,13 @@ class UserQuotaResourceSpec extends AnyFlatSpec with BeforeAndAfterAll with Mock
 
     assert(accessed.size == 1)
     assert(accessed.get(0) == testWid)
+  }
+
+  it should "include a workflow the user owns without an access row" in {
+    resetFixtures()
+    insertOwnership()
+
+    assert(UserQuotaResource.getUserAccessedWorkflow(testUid).asScala.toList == List(testWid))
   }
 
   // ─── getUserQuotaSize ──────────────────────────────────────────────────────

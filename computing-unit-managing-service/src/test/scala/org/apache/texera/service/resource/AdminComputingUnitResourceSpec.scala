@@ -20,7 +20,9 @@
 package org.apache.texera.service.resource
 
 import jakarta.annotation.security.RolesAllowed
+import jakarta.ws.rs.NotFoundException
 import org.apache.texera.auth.SessionUser
+import org.apache.texera.common.config.KubernetesConfig
 import org.apache.texera.dao.MockTexeraDB
 import org.apache.texera.dao.jooq.generated.Tables.WORKFLOW_COMPUTING_UNIT
 import org.apache.texera.dao.jooq.generated.enums.{
@@ -67,8 +69,10 @@ class AdminComputingUnitResourceSpec
     u.setName(name)
     u.setEmail(s"user$uid@example.com")
     u.setRole(UserRoleEnum.ADMIN)
-    u.setPassword("password")
-    u.setGoogleAvatar(s"avatar-$uid")
+    // Credentials live in auth_provider now, and this spec exercises the listing rather than
+    // login, so the user needs none. The avatar column is provider-neutral; the DTO field it
+    // feeds is still named ownerAvatar.
+    u.setAvatar(s"avatar-$uid")
     u
   }
 
@@ -115,7 +119,7 @@ class AdminComputingUnitResourceSpec
     // isOwner tracks the caller; owner name/avatar are joined from the user table.
     byCuid(700).isOwner shouldBe true
     byCuid(700).ownerName shouldBe "admin"
-    byCuid(700).ownerGoogleAvatar shouldBe "avatar-700"
+    byCuid(700).ownerAvatar shouldBe "avatar-700"
     byCuid(701).isOwner shouldBe false
     byCuid(701).ownerName shouldBe "other"
   }
@@ -154,5 +158,19 @@ class AdminComputingUnitResourceSpec
     result should have size 1
     result.head.isOwner shouldBe false
     result.head.ownerName shouldBe "owner"
+  }
+
+  // kubernetes.enabled is false here, so the endpoint refuses; the enabled path is in
+  // ComputingUnitHelpersSpec. Cancelled if an exported KUBERNETES_COMPUTING_UNIT_ENABLED would
+  // reach the real client.
+  "getClusterCapacity" should "answer 404 on a deployment without Kubernetes computing units" in {
+    assume(
+      !KubernetesConfig.kubernetesComputingUnitEnabled,
+      "kubernetes.enabled is set in this environment"
+    )
+    val refused = intercept[NotFoundException] {
+      new AdminComputingUnitResource().getClusterCapacity(new SessionUser(makeUser(740, "admin")))
+    }
+    refused.getMessage should include("Kubernetes")
   }
 }

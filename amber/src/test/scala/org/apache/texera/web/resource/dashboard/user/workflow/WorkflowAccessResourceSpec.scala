@@ -84,25 +84,21 @@ class WorkflowAccessResourceSpec
     owner.setUid(ownerUid)
     owner.setName("owner")
     owner.setEmail("owner@test.com")
-    owner.setPassword("password")
 
     userWithWrite = new User
     userWithWrite.setUid(userWithWriteUid)
     userWithWrite.setName("user_with_write")
     userWithWrite.setEmail("write@test.com")
-    userWithWrite.setPassword("password")
 
     userWithRead = new User
     userWithRead.setUid(userWithReadUid)
     userWithRead.setName("user_with_read")
     userWithRead.setEmail("read@test.com")
-    userWithRead.setPassword("password")
 
     targetUser = new User
     targetUser.setUid(targetUserUid)
     targetUser.setName("target_user")
     targetUser.setEmail("target@test.com")
-    targetUser.setPassword("password")
 
     // Create test workflow
     testWorkflow = new Workflow
@@ -412,14 +408,14 @@ class WorkflowAccessResourceSpec
     user.setUid(newGranteeUid)
     user.setName(name)
     user.setEmail(email)
-    user.setPassword("password")
     userDao.insert(user)
     user
   }
 
   "WorkflowAccessResource.grantAccess" should "reject granting to a placeholder account" in {
     val placeholder = seedUserWithoutAccess("wf_placeholder", "wf-placeholder@test.com")
-    placeholder.setPassword(null)
+    // a placeholder has no credential at all; under auth_provider that means no row, which
+    // seedUserWithoutAccess already leaves it with
     placeholder.setIsPlaceholder(true)
     userDao.update(placeholder)
 
@@ -437,15 +433,55 @@ class WorkflowAccessResourceSpec
     assert(workflowAccessResource.getOwner(testWorkflowWid) == "owner@test.com")
   }
 
-  "WorkflowAccessResource.getPrivilege" should "report WRITE, READ, and NONE for the respective users" in {
+  "WorkflowAccessResource.getPrivilege" should "report the grantees' privileges and NONE for anyone else" in {
     assert(
       WorkflowAccessResource.getPrivilege(testWorkflowWid, userWithWriteUid) == PrivilegeEnum.WRITE
     )
     assert(
       WorkflowAccessResource.getPrivilege(testWorkflowWid, userWithReadUid) == PrivilegeEnum.READ
     )
-    // The owner has no WORKFLOW_USER_ACCESS row (ownership is tracked separately), so this is NONE.
-    assert(WorkflowAccessResource.getPrivilege(testWorkflowWid, ownerUid) == PrivilegeEnum.NONE)
+    assert(
+      WorkflowAccessResource.getPrivilege(testWorkflowWid, newGranteeUid) == PrivilegeEnum.NONE
+    )
+  }
+
+  it should "give the owner WRITE without an access row" in {
+    assert(WorkflowAccessResource.getPrivilege(testWorkflowWid, ownerUid) == PrivilegeEnum.WRITE)
+    assert(WorkflowAccessResource.hasWriteAccess(testWorkflowWid, ownerUid))
+    assert(WorkflowAccessResource.hasGrantedAccess(testWorkflowWid, ownerUid))
+  }
+
+  it should "give the owner WRITE even when their access row says READ" in {
+    workflowUserAccessDao.insert(
+      new WorkflowUserAccess(ownerUid, testWorkflowWid, PrivilegeEnum.READ)
+    )
+    assert(WorkflowAccessResource.getPrivilege(testWorkflowWid, ownerUid) == PrivilegeEnum.WRITE)
+  }
+
+  it should "not fail when the workflow has several owner rows" in {
+    workflowOfUserDao.insert(new WorkflowOfUser(userWithReadUid, testWorkflowWid))
+    assert(WorkflowAccessResource.getPrivilege(testWorkflowWid, ownerUid) == PrivilegeEnum.WRITE)
+    assert(
+      WorkflowAccessResource.getPrivilege(testWorkflowWid, userWithReadUid) == PrivilegeEnum.WRITE
+    )
+    assert(
+      WorkflowAccessResource.getPrivilege(testWorkflowWid, userWithWriteUid) == PrivilegeEnum.WRITE
+    )
+  }
+
+  "WorkflowAccessResource.accessibleWids" should "list owned and granted workflows, once each" in {
+    workflowUserAccessDao.insert(
+      new WorkflowUserAccess(ownerUid, testWorkflowWid, PrivilegeEnum.WRITE)
+    )
+    def wids(uid: Integer) =
+      getDSLContext
+        .fetch(WorkflowAccessResource.accessibleWids(uid))
+        .getValues(0, classOf[Integer])
+        .asScala
+        .toList
+    assert(wids(ownerUid) == List(testWorkflowWid))
+    assert(wids(userWithReadUid) == List(testWorkflowWid))
+    assert(wids(newGranteeUid).isEmpty)
   }
 
   "WorkflowAccessResource.getAccessList" should "list the granted users with their privilege, excluding the owner" in {

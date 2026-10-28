@@ -22,7 +22,6 @@ import {
   LogicalOperator,
   LogicalPlan,
   OperatorStatsUpdate,
-  WebOutputMode,
   WorkflowResultUpdateEvent,
 } from "./execute-workflow.interface";
 import { IndexableObject } from "./result-table.interface";
@@ -97,6 +96,8 @@ export type PaginationRequest = Readonly<{
   columnOffset?: number;
   columnLimit?: number;
   columnSearch?: string;
+  // which of the operator's output ports to read; left out, the first
+  portIndex?: number;
 }>;
 
 export type PaginatedResultEvent = Readonly<{
@@ -105,6 +106,9 @@ export type PaginatedResultEvent = Readonly<{
   pageIndex: number;
   table: ReadonlyArray<IndexableObject>;
   schema: ReadonlyArray<SchemaAttribute>;
+  portIndex: number;
+  // the port's whole row count, for a port the running execution does not report on
+  totalTuples: number;
 }>;
 
 export type ResultExportRequest = Readonly<{
@@ -124,22 +128,7 @@ export type ResultExportResponse = Readonly<{
   message: string;
 }>;
 
-export type OperatorAvailableResult = Readonly<{
-  operatorID: string;
-  cacheValid: boolean;
-  outputMode: WebOutputMode;
-}>;
-
-export type WorkflowAvailableResultEvent = Readonly<{
-  availableOperators: ReadonlyArray<OperatorAvailableResult>;
-}>;
-
 export type OperatorResultCacheStatus = "cache invalid" | "cache valid";
-
-export interface CacheStatusUpdateEvent
-  extends Readonly<{
-    cacheStatusMap: Record<string, OperatorResultCacheStatus>;
-  }> {}
 
 export type PythonExpressionEvaluateRequest = Readonly<{
   expression: string;
@@ -206,7 +195,6 @@ export type WorkflowStateInfo = Readonly<{
 }>;
 
 export type TexeraWebsocketRequestTypeMap = {
-  EditingTimeCompilationRequest: LogicalPlan;
   HeartBeatRequest: {};
   ModifyLogicRequest: ModifyOperatorLogic;
   ResultExportRequest: ResultExportRequest;
@@ -233,8 +221,6 @@ export type TexeraWebsocketEventTypeMap = {
   OperatorCurrentTuplesUpdateEvent: OperatorCurrentTuples;
   PaginatedResultEvent: PaginatedResultEvent;
   ResultExportResponse: ResultExportResponse;
-  WorkflowAvailableResultEvent: WorkflowAvailableResultEvent;
-  CacheStatusUpdateEvent: CacheStatusUpdateEvent;
   PythonExpressionEvaluateResponse: PythonExpressionEvaluateResponse;
   WorkerAssignmentUpdateEvent: WorkerAssignmentUpdateEvent;
   ModifyLogicResponse: ModifyLogicResponse;
